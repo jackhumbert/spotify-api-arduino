@@ -84,7 +84,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 
 #define SPOTIFY_MAX_NUM_ARTISTS 5
 
-#define SPOTIFY_ACCESS_TOKEN_LENGTH 309
+#define SPOTIFY_ACCESS_TOKEN_LENGTH 368
 
 enum RepeatOptions
 {
