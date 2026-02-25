@@ -44,6 +44,8 @@ int SpotifyArduino::makeRequestWithBody(const char *type, const char *command, c
     client->flush();
 #ifdef SPOTIFY_DEBUG
     Serial.println(host);
+    Serial.print(type);
+    Serial.println(command);
 #endif
     client->setTimeout(SPOTIFY_TIMEOUT);
     if (!client->connect(host, portNumber))
@@ -84,6 +86,59 @@ int SpotifyArduino::makeRequestWithBody(const char *type, const char *command, c
     client->println();
 
     client->print(body);
+
+    if (client->println() == 0)
+    {
+#ifdef SPOTIFY_SERIAL_OUTPUT
+        Serial.println(F("Failed to send request"));
+#endif
+        return -2;
+    }
+
+    int statusCode = getHttpStatusCode();
+    return statusCode;
+}
+
+int SpotifyArduino::makeRequestWithoutBody(const char *type, const char *command, const char *authorization, const char *host)
+{
+    client->flush();
+#ifdef SPOTIFY_DEBUG
+    Serial.println(host);
+    Serial.print(type);
+    Serial.println(command);
+#endif
+    client->setTimeout(SPOTIFY_TIMEOUT);
+    if (!client->connect(host, portNumber))
+    {
+#ifdef SPOTIFY_SERIAL_OUTPUT
+        Serial.println(F("Connection failed"));
+#endif
+        return -1;
+    }
+
+    // give the esp a breather
+    yield();
+
+    // Send HTTP request
+    client->print(type);
+    client->print(command);
+    client->println(F(" HTTP/1.0"));
+
+    //Headers
+    client->print(F("Host: "));
+    client->println(host);
+
+    client->println(F("Accept: application/json"));
+
+    if (authorization != NULL)
+    {
+        client->print(F("Authorization: "));
+        client->println(authorization);
+    }
+
+    client->println(F("Cache-Control: no-cache"));
+    client->print(F("Content-Length: "));
+    client->println(0);
 
     if (client->println() == 0)
     {
@@ -500,6 +555,127 @@ bool SpotifyArduino::transferPlayback(const char *deviceId, bool play)
     return statusCode == 204;
 }
 
+void hexchar(unsigned char c, unsigned char &hex1, unsigned char &hex2)
+{
+    hex1 = c / 16;
+    hex2 = c % 16;
+    hex1 += hex1 <= 9 ? '0' : 'a' - 10;
+    hex2 += hex2 <= 9 ? '0' : 'a' - 10;
+}
+
+std::string urlencode(std::string s)
+{
+    const char *str = s.c_str();
+    std::vector<char> v(s.size());
+    v.clear();
+    for (size_t i = 0, l = s.size(); i < l; i++)
+    {
+        char c = str[i];
+        if ((c >= '0' && c <= '9') ||
+            (c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            c == '-' || c == '_' || c == '.' || c == '!' || c == '~' ||
+            c == '*' || c == '\'' || c == '(' || c == ')')
+        {
+            v.push_back(c);
+        }
+        else if (c == ' ')
+        {
+            v.push_back('+');
+        }
+        else
+        {
+            v.push_back('%');
+            unsigned char d1, d2;
+            hexchar(c, d1, d2);
+            v.push_back(d1);
+            v.push_back(d2);
+        }
+    }
+
+    return std::string(v.cbegin(), v.cend());
+}
+
+bool SpotifyArduino::isSongInLibrary(const char *trackId, bool &inLibary)
+{
+    char command[2048];
+    sprintf(command, "/v1/me/library/contains?uris=%s", urlencode(trackId).c_str());
+
+#ifdef SPOTIFY_DEBUG
+    Serial.println(command);
+#endif
+
+    const size_t bufferSize = getDevicesBufferSize;
+    if (autoTokenRefresh)
+    {
+        checkAndRefreshAccessToken();
+    }
+    int statusCode = makeGetRequest(command, _bearerToken);
+#ifdef SPOTIFY_DEBUG
+    Serial.print("Status Code: ");
+    Serial.println(statusCode);
+#endif
+
+    if (statusCode > 0)
+    {
+        skipHeaders(false);
+    }
+
+    if (statusCode == 200)
+    {
+        DynamicJsonDocument doc(bufferSize);
+        DeserializationError error = deserializeJson(doc, *client);
+        if (!error)
+        {
+            if (doc.size()) 
+            {
+                inLibary = doc[0];
+            }
+        }
+    }
+
+    closeClient();
+    return statusCode == 200;
+}
+
+bool SpotifyArduino::addSongToLibrary(const char *trackId)
+{
+    char command[2048];
+    sprintf(command, "/v1/me/library?uris=%s", urlencode(trackId).c_str());
+
+#ifdef SPOTIFY_DEBUG
+    Serial.println(command);
+#endif
+
+    if (autoTokenRefresh)
+    {
+        checkAndRefreshAccessToken();
+    }
+    int statusCode = makeRequestWithoutBody("PUT ", command, _bearerToken);
+
+    closeClient();
+    return statusCode == 200;
+}
+
+bool SpotifyArduino::removeSongFromLibrary(const char *trackId)
+{
+    char command[2048];
+    sprintf(command, "/v1/me/library?uris=%s", urlencode(trackId).c_str());
+
+#ifdef SPOTIFY_DEBUG
+    Serial.println(command);
+#endif
+
+    if (autoTokenRefresh)
+    {
+        checkAndRefreshAccessToken();
+    }
+    int statusCode = makeRequestWithoutBody("DELETE ", command, _bearerToken);
+
+    closeClient();
+    return statusCode == 200;
+}
+
 int SpotifyArduino::getCurrentlyPlaying(processCurrentlyPlaying currentlyPlayingCallback, const char *market)
 {
     char command[75] = SPOTIFY_CURRENTLY_PLAYING_ENDPOINT;
@@ -655,8 +831,7 @@ int SpotifyArduino::getCurrentlyPlaying(processCurrentlyPlaying currentlyPlaying
                 }
 #ifdef SPOTIFY_DEBUG
                 Serial.print(F("Num Images: "));
-                Serial.println(current.numImages);
-                Serial.println(numImages);
+                Serial.printf("%d vs %d\n", current.numImages, numImages);
 #endif
 
                 for (int i = 0; i < current.numImages; i++)
@@ -703,8 +878,7 @@ int SpotifyArduino::getCurrentlyPlaying(processCurrentlyPlaying currentlyPlaying
                 }
 #ifdef SPOTIFY_DEBUG
                 Serial.print(F("Num Images: "));
-                Serial.println(current.numImages);
-                Serial.println(numImages);
+                Serial.printf("%d vs %d\n", current.numImages, numImages);
 #endif
 
                 for (int i = 0; i < current.numImages; i++)

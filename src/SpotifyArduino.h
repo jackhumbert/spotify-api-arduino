@@ -184,6 +184,7 @@ public:
   // Generic Request Methods
   int makeGetRequest(const char *command, const char *authorization, const char *accept = "application/json", const char *host = SPOTIFY_HOST);
   int makeRequestWithBody(const char *type, const char *command, const char *authorization, const char *body = "", const char *contentType = "application/json", const char *host = SPOTIFY_HOST);
+  int makeRequestWithoutBody(const char *type, const char *command, const char *authorization, const char *host = SPOTIFY_HOST);
   int makePostRequest(const char *command, const char *authorization, const char *body = "", const char *contentType = "application/json", const char *host = SPOTIFY_HOST);
   int makePutRequest(const char *command, const char *authorization, const char *body = "", const char *contentType = "application/json", const char *host = SPOTIFY_HOST);
 
@@ -203,6 +204,10 @@ public:
   bool playerNavigate(char *command, const char *deviceId = "");
   bool seek(int position, const char *deviceId = "");
   bool transferPlayback(const char *deviceId, bool play = false);
+
+  bool isSongInLibrary(const char *trackId, bool &inLibrary);
+  bool addSongToLibrary(const char *trackId);
+  bool removeSongFromLibrary(const char *trackId);
 
   //Search
   int searchForSong(String query, int limit, processSearch searchCallback, SearchResult results[]);
